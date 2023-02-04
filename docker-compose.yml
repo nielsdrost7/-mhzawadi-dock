@@ -1,50 +1,110 @@
 version: '3.5'
 
-# docker stack deploy --compose-file stack-invoiceplane.yml invoiceplane
+networks:
+  invoiceplane:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.25.0.0/17
 
 volumes:
   invoiceplane_data:
+  nginx_logs:
   mariadb_10_4:
 
 services:
-  proxyv2:
-    image: traefik:v2.5 # The official Traefik docker image
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker"
-    ports:
-      - "80:80"     # The HTTP port
-      - "443:443"   # The HTTP port
-      - "8181:8080" # The Web UI (enabled by --api)
+  # --- PHP 8.1
+  php:
+    container_name: "invoiceplane-php"
+    build:
+      context: ./resources/docker/php-fpm
+      args:
+        - PUID=1000
+        - PGID=1000
+        - TZ=UTC
+    links:
+      - mariadb_10_4
+    expose:
+      - "9000"
+    dns: 8.8.8.8
+    depends_on:
+      - mariadb_10_4
+    networks:
+      invoiceplane:
+        ipv4_address: 172.25.0.11
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # So that Traefik can listen to the Docker events
-    labels:
-      - "traefik.enable=false"
-  invoiceplane:
-    image: mhzawadi/invoiceplane:dev
-    volumes:
-      - invoiceplane_data:/var/www/html/uploads
+      - ./resources/docker/php-fpm/php.ini:/usr/local/etc/php/php.ini
+
+  # --- nginx 1.23
+  nginx:
+    container_name: "invoiceplane-nginx"
+    build:
+      context: ./resources/docker/nginx
     environment:
       - TZ=utc
       - MYSQL_HOST=mariadb_10_4
-      - MYSQL_USER=InvoicePlane
-      - MYSQL_PASSWORD=invoiceplane
-      - MYSQL_DB=InvoicePlane
+      - MYSQL_USER=ipdevdb
+      - MYSQL_PASSWORD=ipdevdb
+      - MYSQL_DB=ipdevdb
       - IP_URL=http://invoiceplane.docker.local
       - DISABLE_SETUP=false
-    labels:
-      - "traefik.http.routers.invoiceplane.rule=Host(`invoiceplane.docker.local`)"
-      - "traefik.http.routers.invoiceplane.service=invoiceplane"
-      - "traefik.http.services.invoiceplane.loadbalancer.server.port=80"
+    links:
+      - php
+    ports:
+      - "80:80"
+    dns: 8.8.8.8
+    depends_on:
+      - php
+    networks:
+      invoiceplane:
+        ipv4_address: 172.25.0.12
+    volumes:
+      - nginx_logs:/var/log/nginx
+      - invoiceplane_data:/var/www/html/uploads
+      - ./resources/docker/nginx/invoiceplane.conf:/etc/nginx/conf.d/invoiceplane.conf:ro
   mariadb_10_4:
     # MySQL 5.7
-    image: mariadb:10.4.10
+    build:
+      context: ./resources/docker/mariadb
+    environment:
+      - MYSQL_ROOT_PASSWORD=ipdevdb
+      - MYSQL_DATABASE=ipdevdb
+      - MYSQL_USER=ipdevdb
+      - MYSQL_PASSWORD=ipdevdb
+    ports:
+      - "3306:3306"
+    networks:
+      invoiceplane:
+        ipv4_address: 172.25.0.13
     volumes:
       - mariadb_10_4:/var/lib/mysql
+  phpmyadmin:
+    container_name: "invoiceplane-dbadmin"
+    build:
+      context: ./resources/docker/phpmyadmin
     environment:
-      - MYSQL_ROOT_PASSWORD=mysql_password
-      - MYSQL_DATABASE=InvoicePlane
-      - MYSQL_USER=InvoicePlane
-      - MYSQL_PASSWORD=invoiceplane
-    labels:
-      - "traefik.enable=false"
+      - PMA_HOST=invoiceplane-db
+      #- PMA_USER=root
+      #- PMA_PASSWORD=ipdevdb
+      #- PMA_ROOT_PASSWORD=ipdevdb
+      - MYSQL_DATABASE=invoiceplane_db
+      - MYSQL_USER=ipdevdb
+      - MYSQL_PASSWORD=ipdevdb
+      - MYSQL_ROOT_PASSWORD=ipdevdb
+      - MAX_EXECUTION_TIME=600
+      - MEMORY_LIMIT=256M
+      - UPLOAD_LIMIT=2G
+    depends_on:
+      - mariadb_10_4
+    links:
+      - mariadb_10_4
+    restart: always
+    volumes:
+      - ./resources/docker/phpmyadmin/config.user.inc.php:/etc/phpmyadmin/config.user.inc.php
+      - ./resources/docker/databases:/var/www/html/tmp/upload_databases
+    ports:
+      - "8081:80"
+    networks:
+      invoiceplane:
+        ipv4_address: 172.25.0.16
