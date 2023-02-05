@@ -3,11 +3,11 @@ MAINTAINER Matthew Horwood <matt@horwood.biz>
 
 RUN apk update                             \
     &&  apk add nginx php81-fpm \
-    php81-gd php81-mbstring php81-mysqli php81-openssl \
+    php81-gd php81-mbstring php-iconv php81-mysqli php81-openssl \
     php81-xml php81-intl php81-bcmath composer curl \
     && rm -f /var/cache/apk/* \
     && mkdir -p /var/www/html/ \
-  	&& mkdir -p /run/nginx;
+    && mkdir -p /run/nginx;
 
 ENV IP_SOURCE="https://github.com/InvoicePlane/InvoicePlane/releases/download" \
     IP_VERSION="v1.6.0" \
@@ -40,5 +40,5 @@ ENTRYPOINT ["/config/start.sh"]
 CMD ["nginx", "-g", "daemon off;"]
 
 ## Health Check
-HEALTHCHECK --interval=1m --timeout=3s --start-period=5s \
-  CMD curl -f http://127.0.0.1/index.php || exit 1
+#HEALTHCHECK --interval=1m --timeout=3s --start-period=5s \
+#    CMD curl -f http://127.0.0.1/index.php || exit 1
